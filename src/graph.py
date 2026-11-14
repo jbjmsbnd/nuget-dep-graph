@@ -1,8 +1,8 @@
 """Dependency graph construction and traversal.
 
 Builds a transitive dependency graph from a package->deps mapping
-using iterative DFS. Handles cycles, applies an optional filter on
-package names, and returns nodes in a deterministic order.
+using iterative DFS, and finds transitive reverse dependencies.
+Handles cycles, applies an optional filter on package names.
 """
 
 from __future__ import annotations
@@ -15,6 +15,14 @@ def _is_filtered(name: str, filt: str) -> bool:
     if not filt:
         return False
     return filt in name
+
+
+def _all_names(mapping: Graph) -> set[str]:
+    """Return every package name mentioned in mapping (keys+values)."""
+    names: set[str] = set(mapping)
+    for deps in mapping.values():
+        names.update(deps)
+    return names
 
 
 def build_graph(
@@ -57,3 +65,49 @@ def build_graph(
             if child not in visited:
                 stack.append((child, False))
     return nodes, edges
+
+
+def _invert(mapping: Graph) -> Graph:
+    """Return mapping with all edges reversed."""
+    inverted: Graph = {name: [] for name in mapping}
+    for parent, children in mapping.items():
+        for child in children:
+            inverted.setdefault(child, []).append(parent)
+    return inverted
+
+
+def reverse_dependencies(
+    mapping: Graph,
+    target: str,
+    filt: str = "",
+) -> list[str]:
+    """Return all transitive dependents of target.
+
+    A dependent is any package that directly or transitively lists
+    target among its dependencies. Uses iterative DFS over the
+    inverted graph. Cycles are handled. Filtered packages are
+    excluded from the result (both target and dependents).
+    The target itself is never included, even in a cycle.
+    Returns names in DFS order; empty if target is unknown or
+    filtered.
+    """
+    if target not in _all_names(mapping):
+        return []
+    if _is_filtered(target, filt):
+        return []
+    inverted = _invert(mapping)
+    visited: set[str] = {target}
+    order: list[str] = []
+    stack: list[str] = list(inverted.get(target, []))
+    while stack:
+        name = stack.pop()
+        if name in visited:
+            continue
+        if _is_filtered(name, filt):
+            continue
+        visited.add(name)
+        order.append(name)
+        for parent in inverted.get(name, []):
+            if parent not in visited:
+                stack.append(parent)
+    return order

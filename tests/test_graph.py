@@ -1,8 +1,8 @@
-"""Tests for src.graph.build_graph."""
+"""Tests for src.graph: build_graph and reverse_dependencies."""
 
 from __future__ import annotations
 
-from src.graph import build_graph
+from src.graph import build_graph, reverse_dependencies
 
 
 SIMPLE = {
@@ -103,3 +103,58 @@ def test_filter_substring_match() -> None:
     mapping = {"A": ["Foo.Bar", "Baz"]}
     nodes, _ = build_graph("A", mapping, filt=".Bar")
     assert nodes == ["A", "Baz"]
+
+
+def test_reverse_leaf() -> None:
+    """Direct and transitive dependents of a leaf are found."""
+    deps = reverse_dependencies(SIMPLE, "D")
+    assert sorted(deps) == ["A", "B", "C"]
+
+
+def test_reverse_root_has_none() -> None:
+    """Root has no dependents in a tree."""
+    assert reverse_dependencies(SIMPLE, "A") == []
+
+
+def test_reverse_middle() -> None:
+    """Dependents of a middle node are its ancestors."""
+    assert reverse_dependencies(SIMPLE, "B") == ["A"]
+
+
+def test_reverse_unknown() -> None:
+    """Unknown target yields empty list."""
+    assert reverse_dependencies(SIMPLE, "Z") == []
+
+
+def test_reverse_cycle() -> None:
+    """In a cycle the other nodes depend on the target."""
+    deps = reverse_dependencies(CYCLE, "A")
+    assert sorted(deps) == ["B", "C"]
+
+
+def test_reverse_cycle_target_excluded() -> None:
+    """The target never appears in its own reverse deps."""
+    deps = reverse_dependencies(CYCLE, "A")
+    assert "A" not in deps
+
+
+def test_reverse_self_cycle_excluded() -> None:
+    """Self-loop does not make the node depend on itself."""
+    assert reverse_dependencies(SELF, "A") == []
+
+
+def test_reverse_filter_target() -> None:
+    """Filtered target yields empty list."""
+    assert reverse_dependencies(SIMPLE, "D", filt="D") == []
+
+
+def test_reverse_filter_dependent() -> None:
+    """Filtered dependent is excluded from the result."""
+    deps = reverse_dependencies(SIMPLE, "D", filt="B")
+    assert sorted(deps) == ["A", "C"]
+
+
+def test_reverse_target_only_as_value() -> None:
+    """Target mentioned only as a value is still found."""
+    mapping = {"A": ["X"]}
+    assert reverse_dependencies(mapping, "X") == ["A"]

@@ -2,7 +2,8 @@
 
 Parses command-line arguments, validates them, prints debug
 information and runs either online (NuGet HTTP) or offline
-(local JSON test repository) dependency graph traversal.
+(local JSON test repository) dependency graph traversal,
+optionally in reverse (dependents) mode.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from src.graph import build_graph
+from src.graph import Graph, build_graph, reverse_dependencies
 from src.nuget_api import get_direct_dependencies
 from src.test_repo import RepoError, load_test_repo
 
@@ -56,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Substring used to filter out packages.",
     )
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Find transitive dependents (offline only).",
+    )
     return parser
 
 
@@ -72,6 +78,10 @@ def validate_args(args: argparse.Namespace) -> None:
             raise ValueError(
                 "--version must be explicit for online mode"
             )
+        if args.reverse:
+            raise ValueError(
+                "--reverse is supported only in offline mode"
+            )
 
 
 def print_debug(args: argparse.Namespace) -> None:
@@ -83,6 +93,7 @@ def print_debug(args: argparse.Namespace) -> None:
     print(f"  version = {args.version}")
     print(f"  output  = {args.output}")
     print(f"  filter  = {args.filter}")
+    print(f"  reverse = {args.reverse}")
 
 
 def print_dependencies(deps: list[str]) -> None:
@@ -108,6 +119,16 @@ def print_graph(
         print(f"  {parent} -> {child}")
 
 
+def print_reverse(target: str, deps: list[str]) -> None:
+    """Print reverse dependencies of target, one per line."""
+    print(f"Reverse dependencies of {target} ({len(deps)}):")
+    if not deps:
+        print("  (none)")
+        return
+    for dep in deps:
+        print(f"  {dep}")
+
+
 def run_online(args: argparse.Namespace) -> int:
     """Fetch direct dependencies from NuGet and print them."""
     try:
@@ -121,13 +142,28 @@ def run_online(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_offline(args: argparse.Namespace) -> int:
-    """Load local test repository, build and print graph."""
+def _load_offline_mapping(
+    args: argparse.Namespace,
+) -> Graph | None:
+    """Load mapping, print error and return None on failure."""
     try:
-        mapping = load_test_repo(args.source)
+        return load_test_repo(args.source)
     except RepoError as exc:
         print(f"Error: {exc}", file=sys.stderr)
+        return None
+
+
+def run_offline(args: argparse.Namespace) -> int:
+    """Load local test repository and print graph or reverse deps."""
+    mapping = _load_offline_mapping(args)
+    if mapping is None:
         return 1
+    if args.reverse:
+        deps = reverse_dependencies(
+            mapping, args.package, args.filter
+        )
+        print_reverse(args.package, deps)
+        return 0
     nodes, edges = build_graph(
         args.package, mapping, args.filter
     )

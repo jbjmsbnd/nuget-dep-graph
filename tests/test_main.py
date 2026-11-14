@@ -21,6 +21,13 @@ VALID_ARGV = [
 ]
 
 
+def _write_repo(tmp_path: Path, payload: dict) -> Path:
+    """Write JSON payload to a temp repo file and return its path."""
+    p = tmp_path / "repo.json"
+    p.write_text(json.dumps(payload), encoding="utf-8")
+    return p
+
+
 def test_parser_has_all_six_options() -> None:
     """All six CLI options are registered."""
     parser = build_parser()
@@ -32,6 +39,7 @@ def test_parser_has_all_six_options() -> None:
         "version",
         "output",
         "filter",
+        "reverse",
     ):
         assert name in actions
 
@@ -44,6 +52,7 @@ def test_parser_defaults() -> None:
     assert args.version == "13.0.3"
     assert args.output == "graph.png"
     assert args.filter == ""
+    assert args.reverse is False
 
 
 def test_parser_mode_choice() -> None:
@@ -89,7 +98,7 @@ def test_validate_args_empty_output() -> None:
 
 
 def test_validate_args_latest_rejected() -> None:
-    """Default 'latest' version is rejected by validation."""
+    """Default 'latest' version is rejected in online mode."""
     parser = build_parser()
     args = parser.parse_args(
         ["--package", "P", "--source", "x"]
@@ -118,6 +127,24 @@ def test_validate_args_latest_ok_offline() -> None:
     validate_args(args)
 
 
+def test_validate_args_reverse_rejected_online() -> None:
+    """--reverse is rejected in online mode."""
+    parser = build_parser()
+    args = parser.parse_args(VALID_ARGV + ["--reverse"])
+    with pytest.raises(ValueError, match="reverse"):
+        validate_args(args)
+
+
+def test_validate_args_reverse_ok_offline() -> None:
+    """--reverse is allowed in offline mode."""
+    parser = build_parser()
+    args = parser.parse_args(
+        ["--package", "P", "--source", "x",
+         "--mode", "offline", "--reverse"]
+    )
+    validate_args(args)
+
+
 def test_main_success_prints_config(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -138,6 +165,7 @@ def test_main_success_prints_config(
         "version =",
         "output  =",
         "filter  =",
+        "reverse =",
     ):
         assert key in out
     assert "Direct dependencies:" in out
@@ -199,11 +227,7 @@ def test_main_offline_prints_graph(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Offline with valid JSON prints nodes and edges."""
-    p = tmp_path / "repo.json"
-    p.write_text(
-        json.dumps({"A": ["B"], "B": []}),
-        encoding="utf-8",
-    )
+    p = _write_repo(tmp_path, {"A": ["B"], "B": []})
     code = main(
         ["--package", "A", "--source", str(p),
          "--mode", "offline"]
@@ -219,8 +243,7 @@ def test_main_offline_missing_package_returns_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Offline with unknown root package returns 1."""
-    p = tmp_path / "repo.json"
-    p.write_text(json.dumps({"A": []}), encoding="utf-8")
+    p = _write_repo(tmp_path, {"A": []})
     code = main(
         ["--package", "Z", "--source", str(p),
          "--mode", "offline"]
@@ -228,3 +251,32 @@ def test_main_offline_missing_package_returns_1(
     err = capsys.readouterr().err
     assert code == 1
     assert "not in graph" in err
+
+
+def test_main_offline_reverse_prints_dependents(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--reverse in offline prints dependents of the package."""
+    p = _write_repo(
+        tmp_path, {"A": ["B"], "B": ["C"], "C": []}
+    )
+    code = main(
+        ["--package", "C", "--source", str(p),
+         "--mode", "offline", "--reverse"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Reverse dependencies of C (2):" in out
+    assert "A" in out
+    assert "B" in out
+
+
+def test_main_reverse_online_returns_2(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--reverse in online is rejected with code 2."""
+    code = main(VALID_ARGV + ["--reverse"])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "reverse" in err
