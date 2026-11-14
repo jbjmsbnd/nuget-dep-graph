@@ -146,10 +146,12 @@ def test_validate_args_reverse_ok_offline() -> None:
 
 
 def test_main_success_prints_config(
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """main() returns 0, prints config and stub dependencies."""
+    """main() returns 0, prints config, renders to tmp cwd."""
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         main_mod,
         "get_direct_dependencies",
@@ -170,6 +172,8 @@ def test_main_success_prints_config(
         assert key in out
     assert "Direct dependencies:" in out
     assert "Newtonsoft.Json" in out
+    assert (tmp_path / "graph.png").is_file()
+    assert (tmp_path / "graph.puml").is_file()
 
 
 def test_main_empty_package_returns_2(
@@ -225,8 +229,10 @@ def test_main_offline_missing_file_returns_1(
 def test_main_offline_prints_graph(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Offline with valid JSON prints nodes and edges."""
+    monkeypatch.chdir(tmp_path)
     p = _write_repo(tmp_path, {"A": ["B"], "B": []})
     code = main(
         ["--package", "A", "--source", str(p),
@@ -236,6 +242,8 @@ def test_main_offline_prints_graph(
     assert code == 0
     assert "Graph nodes (2):" in out
     assert "A -> B" in out
+    assert "Saved PNG:" in out
+    assert (tmp_path / "graph.png").is_file()
 
 
 def test_main_offline_missing_package_returns_1(
@@ -272,6 +280,21 @@ def test_main_offline_reverse_prints_dependents(
     assert "B" in out
 
 
+def test_main_offline_reverse_no_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--reverse does not produce PNG/PUML artifacts."""
+    monkeypatch.chdir(tmp_path)
+    p = _write_repo(tmp_path, {"A": ["B"], "B": []})
+    main(
+        ["--package", "B", "--source", str(p),
+         "--mode", "offline", "--reverse"]
+    )
+    assert not (tmp_path / "graph.png").exists()
+    assert not (tmp_path / "graph.puml").exists()
+
+
 def test_main_reverse_online_returns_2(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -280,3 +303,19 @@ def test_main_reverse_online_returns_2(
     err = capsys.readouterr().err
     assert code == 2
     assert "reverse" in err
+
+
+def test_main_custom_output_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--output changes the PNG file name."""
+    monkeypatch.chdir(tmp_path)
+    p = _write_repo(tmp_path, {"A": ["B"], "B": []})
+    code = main(
+        ["--package", "A", "--source", str(p),
+         "--mode", "offline", "--output", "custom.png"]
+    )
+    assert code == 0
+    assert (tmp_path / "custom.png").is_file()
+    assert (tmp_path / "custom.puml").is_file()

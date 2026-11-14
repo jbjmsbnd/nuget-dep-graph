@@ -3,16 +3,20 @@
 Parses command-line arguments, validates them, prints debug
 information and runs either online (NuGet HTTP) or offline
 (local JSON test repository) dependency graph traversal,
-optionally in reverse (dependents) mode.
+optionally in reverse (dependents) mode, and renders the graph
+to PlantUML text and PNG.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from src.graph import Graph, build_graph, reverse_dependencies
 from src.nuget_api import get_direct_dependencies
+from src.plantuml import render_plantuml
+from src.render import render_png
 from src.test_repo import RepoError, load_test_repo
 
 MODES = ("online", "offline")
@@ -129,8 +133,27 @@ def print_reverse(target: str, deps: list[str]) -> None:
         print(f"  {dep}")
 
 
+def save_visuals(
+    root: str,
+    nodes: list[str],
+    edges: list[tuple[str, str]],
+    output: str,
+) -> None:
+    """Write PlantUML source and PNG image for the graph."""
+    png_path = Path(output)
+    puml_path = png_path.with_suffix(".puml")
+    title = f"Dependency graph of {root}"
+    puml_path.write_text(
+        render_plantuml(title, nodes, edges),
+        encoding="utf-8",
+    )
+    render_png(root, nodes, edges, png_path)
+    print(f"Saved PlantUML: {puml_path}")
+    print(f"Saved PNG: {png_path}")
+
+
 def run_online(args: argparse.Namespace) -> int:
-    """Fetch direct dependencies from NuGet and print them."""
+    """Fetch direct dependencies from NuGet, print, render."""
     try:
         deps = get_direct_dependencies(
             args.package, args.version, args.source
@@ -139,6 +162,11 @@ def run_online(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     print_dependencies(deps)
+    nodes = [args.package] + [
+        d for d in deps if d != args.package
+    ]
+    edges = [(args.package, d) for d in deps]
+    save_visuals(args.package, nodes, edges, args.output)
     return 0
 
 
@@ -154,7 +182,7 @@ def _load_offline_mapping(
 
 
 def run_offline(args: argparse.Namespace) -> int:
-    """Load local test repository and print graph or reverse deps."""
+    """Load local test repository, print graph or reverse deps."""
     mapping = _load_offline_mapping(args)
     if mapping is None:
         return 1
@@ -174,6 +202,7 @@ def run_offline(args: argparse.Namespace) -> int:
         )
         return 1
     print_graph(nodes, edges)
+    save_visuals(args.package, nodes, edges, args.output)
     return 0
 
 

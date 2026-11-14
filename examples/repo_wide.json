@@ -1,0 +1,8 @@
+{
+  "Web": ["Auth", "Data", "Api"],
+  "Api": ["Data", "Auth"],
+  "Data": ["Common"],
+  "Auth": ["Common", "Crypto"],
+  "Crypto": ["Common"],
+  "Common": []
+}

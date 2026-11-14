@@ -21,4 +21,5 @@ Thumbs.db
 
 # Project artifacts
 *.png
+*.puml
 *.zip

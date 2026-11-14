@@ -1,0 +1,8 @@
+{
+  "App": ["LibA", "LibB"],
+  "LibA": ["Core", "Utils"],
+  "LibB": ["Core", "Logging"],
+  "Utils": ["Core"],
+  "Logging": ["Core"],
+  "Core": []
+}
