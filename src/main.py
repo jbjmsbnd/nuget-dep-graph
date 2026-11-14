@@ -1,8 +1,8 @@
 """CLI entry point for nuget-dep-graph.
 
 Parses command-line arguments, validates them, prints debug
-information and, in online mode, fetches and prints direct
-dependencies of the requested package.
+information and runs either online (NuGet HTTP) or offline
+(local JSON test repository) dependency graph traversal.
 """
 
 from __future__ import annotations
@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+from src.graph import build_graph
 from src.nuget_api import get_direct_dependencies
+from src.test_repo import RepoError, load_test_repo
 
 MODES = ("online", "offline")
 
@@ -65,10 +67,11 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--source must not be empty")
     if not args.output.strip():
         raise ValueError("--output must not be empty")
-    if args.version.strip().lower() == "latest":
-        raise ValueError(
-            "--version must be explicit for online mode"
-        )
+    if args.mode == "online":
+        if args.version.strip().lower() == "latest":
+            raise ValueError(
+                "--version must be explicit for online mode"
+            )
 
 
 def print_debug(args: argparse.Namespace) -> None:
@@ -92,6 +95,19 @@ def print_dependencies(deps: list[str]) -> None:
         print(f"  {dep}")
 
 
+def print_graph(
+    nodes: list[str],
+    edges: list[tuple[str, str]],
+) -> None:
+    """Print graph nodes and edges."""
+    print(f"Graph nodes ({len(nodes)}):")
+    for n in nodes:
+        print(f"  {n}")
+    print(f"Graph edges ({len(edges)}):")
+    for parent, child in edges:
+        print(f"  {parent} -> {child}")
+
+
 def run_online(args: argparse.Namespace) -> int:
     """Fetch direct dependencies from NuGet and print them."""
     try:
@@ -106,12 +122,23 @@ def run_online(args: argparse.Namespace) -> int:
 
 
 def run_offline(args: argparse.Namespace) -> int:
-    """Offline mode placeholder (implemented in stage 3)."""
-    print(
-        "Error: offline mode is not implemented yet",
-        file=sys.stderr,
+    """Load local test repository, build and print graph."""
+    try:
+        mapping = load_test_repo(args.source)
+    except RepoError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    nodes, edges = build_graph(
+        args.package, mapping, args.filter
     )
-    return 1
+    if not nodes:
+        print(
+            f"Error: package {args.package!r} not in graph",
+            file=sys.stderr,
+        )
+        return 1
+    print_graph(nodes, edges)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

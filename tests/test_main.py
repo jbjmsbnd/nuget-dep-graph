@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from src import main as main_mod
@@ -105,6 +108,16 @@ def test_validate_args_latest_case_insensitive() -> None:
         validate_args(args)
 
 
+def test_validate_args_latest_ok_offline() -> None:
+    """'latest' is allowed in offline mode."""
+    parser = build_parser()
+    args = parser.parse_args(
+        ["--package", "P", "--source", "x",
+         "--mode", "offline"]
+    )
+    validate_args(args)
+
+
 def test_main_success_prints_config(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -144,7 +157,7 @@ def test_main_empty_package_returns_2(
 def test_main_latest_version_returns_2(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """main() returns 2 when version is 'latest'."""
+    """main() returns 2 when version is 'latest' in online."""
     code = main(
         ["--package", "P", "--source", "x", "--version", "latest"]
     )
@@ -171,11 +184,47 @@ def test_main_online_network_error_returns_1(
     assert "network down" in err
 
 
-def test_main_offline_returns_1(
+def test_main_offline_missing_file_returns_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Offline mode currently returns 1 with a clear message."""
+    """Offline with nonexistent file returns 1."""
     code = main(VALID_ARGV + ["--mode", "offline"])
     err = capsys.readouterr().err
     assert code == 1
-    assert "offline" in err
+    assert "not found" in err
+
+
+def test_main_offline_prints_graph(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Offline with valid JSON prints nodes and edges."""
+    p = tmp_path / "repo.json"
+    p.write_text(
+        json.dumps({"A": ["B"], "B": []}),
+        encoding="utf-8",
+    )
+    code = main(
+        ["--package", "A", "--source", str(p),
+         "--mode", "offline"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Graph nodes (2):" in out
+    assert "A -> B" in out
+
+
+def test_main_offline_missing_package_returns_1(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Offline with unknown root package returns 1."""
+    p = tmp_path / "repo.json"
+    p.write_text(json.dumps({"A": []}), encoding="utf-8")
+    code = main(
+        ["--package", "Z", "--source", str(p),
+         "--mode", "offline"]
+    )
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "not in graph" in err
