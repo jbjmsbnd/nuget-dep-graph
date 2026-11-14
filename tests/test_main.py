@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from src import main as main_mod
 from src.main import build_parser, main, validate_args
 
 
@@ -84,10 +85,36 @@ def test_validate_args_empty_output() -> None:
         validate_args(args)
 
 
+def test_validate_args_latest_rejected() -> None:
+    """Default 'latest' version is rejected by validation."""
+    parser = build_parser()
+    args = parser.parse_args(
+        ["--package", "P", "--source", "x"]
+    )
+    with pytest.raises(ValueError, match="version"):
+        validate_args(args)
+
+
+def test_validate_args_latest_case_insensitive() -> None:
+    """'LATEST' is rejected too, regardless of case."""
+    parser = build_parser()
+    args = parser.parse_args(
+        ["--package", "P", "--source", "x", "--version", "LATEST"]
+    )
+    with pytest.raises(ValueError, match="version"):
+        validate_args(args)
+
+
 def test_main_success_prints_config(
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """main() returns 0 and prints all config keys."""
+    """main() returns 0, prints config and stub dependencies."""
+    monkeypatch.setattr(
+        main_mod,
+        "get_direct_dependencies",
+        lambda pkg, ver, src: ["Newtonsoft.Json"],
+    )
     code = main(VALID_ARGV)
     out = capsys.readouterr().out
     assert code == 0
@@ -100,6 +127,8 @@ def test_main_success_prints_config(
         "filter  =",
     ):
         assert key in out
+    assert "Direct dependencies:" in out
+    assert "Newtonsoft.Json" in out
 
 
 def test_main_empty_package_returns_2(
@@ -110,3 +139,43 @@ def test_main_empty_package_returns_2(
     err = capsys.readouterr().err
     assert code == 2
     assert "Error:" in err
+
+
+def test_main_latest_version_returns_2(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """main() returns 2 when version is 'latest'."""
+    code = main(
+        ["--package", "P", "--source", "x", "--version", "latest"]
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "version" in err
+
+
+def test_main_online_network_error_returns_1(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RuntimeError from API becomes exit code 1."""
+
+    def boom(pkg: str, ver: str, src: str) -> list[str]:
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(
+        main_mod, "get_direct_dependencies", boom
+    )
+    code = main(VALID_ARGV)
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "network down" in err
+
+
+def test_main_offline_returns_1(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Offline mode currently returns 1 with a clear message."""
+    code = main(VALID_ARGV + ["--mode", "offline"])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "offline" in err

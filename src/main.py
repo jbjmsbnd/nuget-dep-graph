@@ -1,14 +1,16 @@
 """CLI entry point for nuget-dep-graph.
 
-Parses command-line arguments, validates them and prints debug
-information about every option. Real dependency fetching is
-implemented in later stages.
+Parses command-line arguments, validates them, prints debug
+information and, in online mode, fetches and prints direct
+dependencies of the requested package.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+
+from src.nuget_api import get_direct_dependencies
 
 MODES = ("online", "offline")
 
@@ -63,6 +65,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--source must not be empty")
     if not args.output.strip():
         raise ValueError("--output must not be empty")
+    if args.version.strip().lower() == "latest":
+        raise ValueError(
+            "--version must be explicit for online mode"
+        )
 
 
 def print_debug(args: argparse.Namespace) -> None:
@@ -76,6 +82,38 @@ def print_debug(args: argparse.Namespace) -> None:
     print(f"  filter  = {args.filter}")
 
 
+def print_dependencies(deps: list[str]) -> None:
+    """Print direct dependencies, one per line."""
+    print("Direct dependencies:")
+    if not deps:
+        print("  (none)")
+        return
+    for dep in deps:
+        print(f"  {dep}")
+
+
+def run_online(args: argparse.Namespace) -> int:
+    """Fetch direct dependencies from NuGet and print them."""
+    try:
+        deps = get_direct_dependencies(
+            args.package, args.version, args.source
+        )
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print_dependencies(deps)
+    return 0
+
+
+def run_offline(args: argparse.Namespace) -> int:
+    """Offline mode placeholder (implemented in stage 3)."""
+    print(
+        "Error: offline mode is not implemented yet",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI. Return process exit code."""
     parser = build_parser()
@@ -86,7 +124,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     print_debug(args)
-    return 0
+    if args.mode == "online":
+        return run_online(args)
+    return run_offline(args)
 
 
 if __name__ == "__main__":
